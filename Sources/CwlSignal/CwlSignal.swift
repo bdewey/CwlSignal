@@ -72,7 +72,11 @@ public protocol SignalInputInterface {
 ///   2. Synchronous pipelines are processed in nested fashion. More specifically, when `send` is invoked on a `SignalNext`, the next stage in the signal graph is invoked while the previous stage is still on the call-stack. If you use a user-created mutex on a synchronous stage, do not attempt to re-enter the mutex on subsequent stages or you risk deadlock. If you want to apply a mutex to your processing stages, you should either ensure the stages are invoked *asynchronously* (choose an async `Exec` context) or you should apply the mutex to the first stage and use `.direct` for subsquent stages (knowing that they'll be protected by the mutex from the *first* stage).
 ///   3. Delivery of signal values is guaranteed to be in-order and within appropriate mutexes but is not guaranteed to be executed on the sending thread. If subsequent results are sent to a `Signal` from a second thread while the `Signal` is processing a previous result from a first thread the subsequent result will be *queued* and handled on the *first* thread once it completes processing the earlier values.
 ///   4. Handlers, captured values and state values will be released *outside* all contexts or mutexes. If you capture an object with `deinit` behavior in a processing closure, you must apply any synchronization context yourself.
-public class Signal<OutputValue>: SignalInterface {
+public class Signal<OutputValue>: SignalInterface, CustomReflectable {
+  public var customMirror: Mirror {
+    return Mirror(self, children: ["delivery": delivery, "activationCount": activationCount, "preceeding": preceeding], displayStyle: .class, ancestorRepresentation: .suppressed)
+  }
+
 	public var signal: Signal<OutputValue> { return self }
 	
 	// Protection for all mutable members on this class and any attached `signalHandler`.
@@ -1304,7 +1308,11 @@ private struct ItemContext<OutputValue> {
 // If `Signal<OutputValue>` is a delivery channel, then `SignalHandler` is the destination to which it delivers.
 // While the base `SignalHandler<OutputValue>` is not "abstract" in any technical sense, it doesn't do anything by default. Subclasses include `SignalEndpoint` (the user "exit" point for signal results), `SignalProcessor` (used for transforming signals between instances of `Signal<OutputValue>`), `SignalJunction` (for enabling dynamic graph connection and disconnections).
 // `SignalHandler<OutputValue>` is never directly created or held by users of the CwlSignal library. It is implicitly created when one of the listening or transformation methods on `Signal<OutputValue>` are invoked.
-public class SignalHandler<OutputValue> {
+public class SignalHandler<OutputValue>: CustomReflectable {
+  public var customMirror: Mirror {
+    return Mirror(self, children: ["signal": signal], displayStyle: .class, ancestorRepresentation: .generated)
+  }
+
 	final let signal: Signal<OutputValue>
 	final let context: Exec
 	final var handler: (Result<OutputValue>) -> Void { didSet { signal.itemContextNeedsRefresh = true } }
@@ -2950,6 +2958,7 @@ public class SignalMergedInput<InputValue>: SignalMultiInput<InputValue> {
 ///	2. upon connecting to the graph, `SignalEndpoint` "activates" the signal graph (which allows sending through the graph to occur and may trigger some "on activation" behavior).
 /// This class is instantiated by calling `subscribe` on any `Signal`.
 public final class SignalEndpoint<OutputValue>: SignalHandler<OutputValue>, Cancellable {
+
 	private let userHandler: (Result<OutputValue>) -> Void
 	
 	/// Constructor called from `subscribe`
